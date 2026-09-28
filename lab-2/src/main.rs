@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+use core::arch::asm;
 use core::panic::PanicInfo;
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -28,7 +29,7 @@ extern "C" fn start(hart_id: usize) -> ! {
         arch::write_pmpaddr0(usize::MAX);
         arch::write_pmpcfg0(arch::PMP_R | arch::PMP_W | arch::PMP_X | arch::PMP_A_TOR);
         arch::write_tp(hart_id);
-        core::arch::asm!("mret", options(noreturn));
+        asm!("mret", options(noreturn));
     }
 }
 
@@ -36,18 +37,9 @@ extern "C" fn start(hart_id: usize) -> ! {
 extern "C" fn rust_main() -> ! {
     let hart_id = arch::hart_id();
 
+    // 阶段一：UART 必须先就绪，之后任何 hart 才允许输出。
     if hart_id == 0 {
         uart::init();
-        println!("ECNU OSLab rCore kernel entered S-mode");
-        if sync::interrupt_nesting_selftest() {
-            println!("interrupt nesting self-test: PASS");
-        } else {
-            println!("interrupt nesting self-test: FAIL");
-        }
-        println!(
-            "Rust formatting: char={} string={} d={} p={:x} x={:#x}",
-            'A', "uart", -2025, 0x2025_u32, 0x1234_5678_8000_0000_u64,
-        );
         STARTED.store(true, Ordering::Release);
     } else {
         while !STARTED.load(Ordering::Acquire) {
@@ -55,11 +47,37 @@ extern "C" fn rust_main() -> ! {
         }
     }
 
-    let tag = if hart_id == 0 { 'A' } else { 'B' };
-    println!(
-        "hart {} says: char={} string={} d={} p={:x} x={:#x}",
-        hart_id, tag, "uart", -2025, 0x2025_u32, 0x1234_5678_8000_0000_u64,
-    );
+    // 阶段二：只有 hart 0 初始化页帧分配器并建立内核页表。
+    if hart_id == 0 {
+        extern "C" {
+            fn ekernel();
+        }
+
+        unsafe {
+            mm::frame_allocator_init(
+                mm::PhysAddr(ekernel as *const () as usize),
+                mm::PhysAddr(0x8800_0000),
+            );
+        }
+
+        if !mm::run_tests() {
+            println!("hart 0: memory self-test failed, paging left disabled");
+            loop {
+                arch::wait_for_interrupt();
+            }
+        }
+    }
+
+    // 阶段三：两个 hart 都 Acquire 等待 hart 0 发布的同一个 token。
+    let token = loop {
+        let token = mm::kernel_token();
+        if token != 0 {
+            break token;
+        }
+        core::hint::spin_loop();
+    };
+    unsafe { arch::activate_page_table(token) };
+    println!("hart {} paging enabled", hart_id);
 
     loop {
         arch::wait_for_interrupt();

@@ -185,7 +185,19 @@ fn page_table_test() -> bool {
     true
 }
 
-/// TODO(task 7): 依次运行地址、页帧、页表和内核地址空间测试。
 pub fn run_tests() -> bool {
-    address_test() && frame_test() && page_table_test()
+    let address_ok = address_test();
+    println!("lab-2 address test: {}", pass_text(address_ok));
+
+    let frame_ok = frame_test();
+    println!("lab-2 frame test: {}", pass_text(frame_ok));
+
+    let page_table_ok = page_table_test();
+    println!("lab-2 page-table test: {}", pass_text(page_table_ok));
+
+    let prerequisites_ok = address_ok && frame_ok && page_table_ok;
+    let kernel_ok = prerequisites_ok && kernel_space_init().is_ok();
+    println!("lab-2 kernel-space test: {}", pass_text(kernel_ok));
+
+    prerequisites_ok && kernel_ok
 }
