@@ -78,3 +78,9 @@ pub fn disable_interrupts() {
 pub fn wait_for_interrupt() {
     unsafe { asm!("wfi") };
 }
+
+#[inline]
+pub unsafe fn activate_page_table(token: usize) {
+    asm!("csrw satp, {}", in(reg) token);
+    asm!("sfence.vma");
+}
