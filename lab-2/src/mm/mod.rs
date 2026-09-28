@@ -10,6 +10,14 @@ pub use frame_allocator::{
 pub use memory_set::{kernel_space_init, kernel_token};
 pub use page_table::{PageTable, PageTableEntry, PteFlags};
 
+fn pass_text(passed: bool) -> &'static str {
+    if passed {
+        "PASS"
+    } else {
+        "FAIL"
+    }
+}
+
 fn address_test() -> bool {
     let va = VirtAddr(0x12345);
     va.floor().0 == 0x12
@@ -84,7 +92,100 @@ fn frame_test() -> bool {
     true
 }
 
+fn page_table_test() -> bool {
+    let before = free_frame_count();
+
+    let mut page_table = match PageTable::new() {
+        Some(page_table) => page_table,
+        None => {
+            println!("page-table test: cannot create the page table");
+            return false;
+        }
+    };
+    let target = match frame_alloc() {
+        Some(frame) => frame,
+        None => {
+            println!("page-table test: cannot allocate the target frame");
+            return false;
+        }
+    };
+    let other = match frame_alloc() {
+        Some(frame) => frame,
+        None => {
+            println!("page-table test: cannot allocate the spare frame");
+            return false;
+        }
+    };
+
+    let vpn = VirtPageNum(0x12345);
+    if page_table.translate(vpn).is_some() {
+        println!("page-table test: unexpected mapping before map");
+        return false;
+    }
+
+    if page_table
+        .map(vpn, target.ppn(), PteFlags::R | PteFlags::W)
+        .is_err()
+    {
+        println!("page-table test: map failed");
+        return false;
+    }
+    let mapped = match page_table.translate(vpn) {
+        Some(entry) => entry,
+        None => {
+            println!("page-table test: translated entry is missing");
+            return false;
+        }
+    };
+    if mapped.ppn() != target.ppn() {
+        println!("page-table test: translated ppn does not match");
+        return false;
+    }
+
+    if page_table.map(vpn, other.ppn(), PteFlags::R).is_ok() {
+        println!("page-table test: duplicate map was accepted");
+        return false;
+    }
+    if page_table.translate(vpn) != Some(mapped) {
+        println!("page-table test: duplicate map changed the original entry");
+        return false;
+    }
+
+    if page_table.map(vpn, target.ppn(), PteFlags::W).is_ok() {
+        println!("page-table test: W-only mapping was accepted");
+        return false;
+    }
+    if page_table.map(vpn, target.ppn(), PteFlags(0)).is_ok() {
+        println!("page-table test: mapping without leaf permission was accepted");
+        return false;
+    }
+
+    if page_table.unmap(vpn).is_err() {
+        println!("page-table test: unmap failed");
+        return false;
+    }
+    if page_table.translate(vpn).is_some() {
+        println!("page-table test: entry is still mapped after unmap");
+        return false;
+    }
+    if page_table.unmap(vpn).is_ok() {
+        println!("page-table test: second unmap was accepted");
+        return false;
+    }
+
+    // 让测试页表、目标 frame 和临时 frame 全部离开作用域。
+    drop(page_table);
+    drop(target);
+    drop(other);
+
+    if free_frame_count() != before {
+        println!("page-table test: page frames were leaked");
+        return false;
+    }
+    true
+}
+
 /// TODO(task 7): 依次运行地址、页帧、页表和内核地址空间测试。
 pub fn run_tests() -> bool {
-    address_test() && frame_test()
+    address_test() && frame_test() && page_table_test()
 }
