@@ -9,6 +9,7 @@ static STARTED: AtomicBool = AtomicBool::new(false);
 mod arch;
 #[macro_use]
 mod console;
+mod mm;
 mod sync;
 mod uart;
 
