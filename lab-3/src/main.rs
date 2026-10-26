@@ -6,6 +6,7 @@ use core::panic::PanicInfo;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 static STARTED: AtomicBool = AtomicBool::new(false);
+static TRAPS_READY: AtomicBool = AtomicBool::new(false);
 
 mod arch;
 #[macro_use]
@@ -86,6 +87,34 @@ extern "C" fn rust_main() -> ! {
     };
     unsafe { arch::activate_page_table(token) };
     println!("hart {} paging enabled", hart_id);
+
+    // 阶段四：PLIC 三页已映射，才能初始化 PLIC 并打开 trap。
+    if hart_id == 0 {
+        trap::init_global();
+        TRAPS_READY.store(true, Ordering::Release);
+    } else {
+        while !TRAPS_READY.load(Ordering::Acquire) {
+            core::hint::spin_loop();
+        }
+    }
+    trap::init_hart();
+    if hart_id == 0 {
+        uart::enable_receive_interrupt();
+    }
+    println!("hart {} traps enabled", hart_id);
+
+    if hart_id == 0 {
+        let context_ok = trap::context_layout_ok();
+        println!(
+            "lab-3 context test: {}",
+            if context_ok { "PASS" } else { "FAIL" }
+        );
+
+        while timer::ticks() < 3 {
+            arch::wait_for_interrupt();
+        }
+        println!("lab-3 timer test: PASS ticks={}", timer::ticks());
+    }
 
     loop {
         arch::wait_for_interrupt();
