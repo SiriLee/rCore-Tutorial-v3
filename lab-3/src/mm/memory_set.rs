@@ -4,6 +4,8 @@ use super::{PageTable, PhysAddr, PhysPageNum, PteFlags, VirtAddr, VirtPageNum, P
 
 const MEMORY_END: usize = 0x8800_0000;
 const UART_BASE: usize = 0x1000_0000;
+/// PLIC 的 priority、hart 0 S-context enable 与 threshold/claim 三页。
+const PLIC_BASES: [usize; 3] = [0x0c00_0000, 0x0c00_2000, 0x0c20_1000];
 static KERNEL_TOKEN: AtomicUsize = AtomicUsize::new(0);
 
 extern "C" {
@@ -112,6 +114,9 @@ fn check_page(
         .ok_or("kernel-space init: representative page is not mapped")?;
     let flags = entry.flags();
 
+    if entry.ppn().0 != VirtAddr(page_start).floor().0 {
+        return Err("kernel-space init: representative page is not identity mapped");
+    }
     if flags.contains(PteFlags::U) {
         return Err("kernel-space init: kernel page must not be user accessible");
     }
@@ -140,8 +145,17 @@ pub fn kernel_space_init() -> Result<(), &'static str> {
         UART_BASE + PAGE_SIZE,
         PteFlags::R | PteFlags::W,
     )?;
+    // 分页启用后 handler 还要访问 PLIC；三页都必须恒等映射且可读写。
+    for base in PLIC_BASES {
+        map_identity_range(
+            &mut page_table,
+            base,
+            base + PAGE_SIZE,
+            PteFlags::R | PteFlags::W,
+        )?;
+    }
 
-    // 代表页权限自检：代码 R-X、只读数据 R--、数据/BSS R-W、UART R-W，且都不设 U。
+    // 代表页权限自检：代码 R-X、只读数据 R--、数据/BSS R-W、UART/PLIC R-W，且都不设 U。
     check_page(
         &page_table,
         stext as *const () as usize,
@@ -175,12 +189,18 @@ pub fn kernel_space_init() -> Result<(), &'static str> {
         "bss",
     )?;
     check_page(&page_table, UART_BASE, true, true, false, "uart")?;
+    for base in PLIC_BASES {
+        check_page(&page_table, base, true, true, false, "plic")?;
+    }
 
     // 遍历全部普通映射，确认 W 与 X 从不同时出现。
     for (start, end, _) in kernel_sections() {
         check_no_write_execute(&page_table, start, end)?;
     }
     check_no_write_execute(&page_table, UART_BASE, UART_BASE + PAGE_SIZE)?;
+    for base in PLIC_BASES {
+        check_no_write_execute(&page_table, base, base + PAGE_SIZE)?;
+    }
 
     // 每次页表写必须对随后读到 token 的其它 hart 可见，再发布。
     unsafe {

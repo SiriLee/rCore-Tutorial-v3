@@ -1,7 +1,6 @@
-use crate::{arch, plic, timer, uart};
+use crate::{arch, plic, uart};
 
 const SCAUSE_INTERRUPT: usize = 1usize << (usize::BITS - 1);
-const S_SOFTWARE: usize = 1;
 const S_EXTERNAL: usize = 9;
 
 unsafe extern "C" {
@@ -18,7 +17,7 @@ pub fn context_layout_ok() -> bool {
 }
 
 pub fn init_global() {
-    // TODO(task 5): 初始化 PLIC 全局优先级。
+    plic::init();
 }
 
 pub fn init_hart() {
@@ -32,15 +31,39 @@ pub fn init_hart() {
 
 #[no_mangle]
 extern "C" fn kernel_trap_handler(context: &mut KernelTrapContext) {
-    // TODO(task 6): 保存 CSR 快照，精确分派 SSIP 和 SEIP；未知 trap 停机。
-    let _ = (
-        context,
-        SCAUSE_INTERRUPT,
-        S_SOFTWARE,
-        S_EXTERNAL,
-        arch::hart_id(),
-        plic::UART_IRQ,
-        timer::ticks(),
-        uart::putchar as fn(u8),
+    let _ = context;
+    let scause = arch::read_scause();
+
+    if scause & SCAUSE_INTERRUPT != 0 && scause & !SCAUSE_INTERRUPT == S_EXTERNAL {
+        handle_external_interrupt();
+        return;
+    }
+
+    report_unknown_trap(scause);
+}
+
+fn handle_external_interrupt() {
+    let irq = plic::claim();
+    if irq == plic::UART_IRQ {
+        uart::handle_interrupt();
+    } else if irq != 0 {
+        println!("lab-3 unknown external interrupt: irq={}", irq);
+    }
+
+    // 每个非零 claim 必须在同 context 恰好 complete 一次。
+    if irq != 0 {
+        plic::complete(irq);
+    }
+}
+
+fn report_unknown_trap(scause: usize) -> ! {
+    println!(
+        "lab-3 unknown trap: scause={:#x} sepc={:#x} stval={:#x}",
+        scause,
+        arch::read_sepc(),
+        arch::read_stval()
     );
+    loop {
+        arch::wait_for_interrupt();
+    }
 }

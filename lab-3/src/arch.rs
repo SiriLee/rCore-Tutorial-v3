@@ -70,6 +70,27 @@ pub fn hart_id() -> usize {
 }
 
 #[inline]
+pub fn read_scause() -> usize {
+    let value;
+    unsafe { asm!("csrr {}, scause", out(reg) value) };
+    value
+}
+
+#[inline]
+pub fn read_sepc() -> usize {
+    let value;
+    unsafe { asm!("csrr {}, sepc", out(reg) value) };
+    value
+}
+
+#[inline]
+pub fn read_stval() -> usize {
+    let value;
+    unsafe { asm!("csrr {}, stval", out(reg) value) };
+    value
+}
+
+#[inline]
 fn read_sstatus() -> usize {
     let value;
     unsafe { asm!("csrr {}, sstatus", out(reg) value) };
