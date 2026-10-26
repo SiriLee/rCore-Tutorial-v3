@@ -22,8 +22,12 @@ pub fn init_global() {
 }
 
 pub fn init_hart() {
-    // TODO(task 6): 写 stvec，初始化当前 hart PLIC，并打开 SSIE/SEIE/SIE。
-    let _ = kernel_vector as *const () as usize;
+    unsafe {
+        arch::set_stvec(kernel_vector as *const () as usize);
+    }
+    plic::init_hart(arch::hart_id());
+    // 总开关必须是最后一步：入口和 PLIC 都就绪后才允许中断到达。
+    arch::enable_supervisor_trap_interrupts();
 }
 
 #[no_mangle]

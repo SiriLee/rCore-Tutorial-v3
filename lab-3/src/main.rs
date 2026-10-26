@@ -11,10 +11,14 @@ mod arch;
 #[macro_use]
 mod console;
 mod mm;
+mod plic;
 mod sync;
+mod timer;
+mod trap;
 mod uart;
 
 core::arch::global_asm!(include_str!("entry.S"));
+core::arch::global_asm!(include_str!("trap.S"));
 
 #[no_mangle]
 extern "C" fn start(hart_id: usize) -> ! {
@@ -29,6 +33,9 @@ extern "C" fn start(hart_id: usize) -> ! {
         arch::write_pmpaddr0(usize::MAX);
         arch::write_pmpcfg0(arch::PMP_R | arch::PMP_W | arch::PMP_X | arch::PMP_A_TOR);
         arch::write_tp(hart_id);
+        // 把同步异常与 S-mode 软件/时钟/外部中断委托给 S-mode。
+        arch::write_medeleg(0xffff);
+        arch::write_mideleg((1 << 1) | (1 << 5) | (1 << 9));
         asm!("mret", options(noreturn));
     }
 }
