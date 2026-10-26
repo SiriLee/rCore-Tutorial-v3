@@ -1,0 +1,3 @@
+/target/
+/kernel-qemu.elf
+/kernel.asm
