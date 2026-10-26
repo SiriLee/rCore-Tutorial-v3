@@ -36,6 +36,7 @@ extern "C" fn start(hart_id: usize) -> ! {
         // 把同步异常与 S-mode 软件/时钟/外部中断委托给 S-mode。
         arch::write_medeleg(0xffff);
         arch::write_mideleg((1 << 1) | (1 << 5) | (1 << 9));
+        timer::init_machine(hart_id);
         asm!("mret", options(noreturn));
     }
 }

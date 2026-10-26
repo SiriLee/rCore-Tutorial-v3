@@ -1,6 +1,7 @@
-use crate::{arch, plic, uart};
+use crate::{arch, plic, timer, uart};
 
 const SCAUSE_INTERRUPT: usize = 1usize << (usize::BITS - 1);
+const S_SOFTWARE: usize = 1;
 const S_EXTERNAL: usize = 9;
 
 unsafe extern "C" {
@@ -33,10 +34,18 @@ pub fn init_hart() {
 extern "C" fn kernel_trap_handler(context: &mut KernelTrapContext) {
     let _ = context;
     let scause = arch::read_scause();
+    let is_interrupt = scause & SCAUSE_INTERRUPT != 0;
+    let code = scause & !SCAUSE_INTERRUPT;
 
-    if scause & SCAUSE_INTERRUPT != 0 && scause & !SCAUSE_INTERRUPT == S_EXTERNAL {
-        handle_external_interrupt();
-        return;
+    if is_interrupt {
+        if code == S_SOFTWARE {
+            timer::update(arch::hart_id());
+            return;
+        }
+        if code == S_EXTERNAL {
+            handle_external_interrupt();
+            return;
+        }
     }
 
     report_unknown_trap(scause);

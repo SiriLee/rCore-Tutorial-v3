@@ -122,6 +122,12 @@ pub fn enable_supervisor_trap_interrupts() {
     }
 }
 
+/// 只清除 `sip.SSIP`，不能碰到同一寄存器里的其它挂起位。
+#[inline]
+pub fn clear_supervisor_software_interrupt() {
+    unsafe { asm!("csrc sip, {}", in(reg) 1usize << 1) };
+}
+
 #[inline]
 pub fn wait_for_interrupt() {
     unsafe { asm!("wfi") };

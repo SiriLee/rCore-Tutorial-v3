@@ -1,4 +1,8 @@
+use core::arch::asm;
+use core::ptr::addr_of_mut;
 use core::sync::atomic::{AtomicUsize, Ordering};
+
+use crate::arch;
 
 pub const INTERVAL: usize = 1_000_000;
 const CLINT_MTIME: usize = 0x0200_bff8;
@@ -15,19 +19,30 @@ unsafe extern "C" {
 /// # Safety
 /// 只能由对应 hart 在 M-mode 启动阶段调用一次。
 pub unsafe fn init_machine(hart_id: usize) {
-    // TODO(task 4): 设置 mtimecmp、mscratch、mtvec、mstatus.MIE 和 mie.MTIE。
-    let _ = (
-        hart_id,
-        CLINT_MTIME,
-        CLINT_MTIMECMP,
-        INTERVAL,
-        timer_vector as *const () as usize,
-    );
+    assert!(hart_id < MAX_HARTS);
+
+    let mtimecmp = (CLINT_MTIMECMP + hart_id * 8) as *mut usize;
+    let now = core::ptr::read_volatile(CLINT_MTIME as *const usize);
+    core::ptr::write_volatile(mtimecmp, now.wrapping_add(INTERVAL));
+
+    // 每个 hart 独占五字 scratch：[a1, a2, a3, mtimecmp, interval]。
+    let base = addr_of_mut!(TIMER_SCRATCH).cast::<usize>();
+    let scratch = base.add(hart_id * 5);
+    scratch.add(3).write(mtimecmp as usize);
+    scratch.add(4).write(INTERVAL);
+
+    asm!("csrw mscratch, {}", in(reg) scratch);
+    asm!("csrw mtvec, {}", in(reg) timer_vector as *const () as usize);
+    asm!("csrs mstatus, {}", in(reg) 1usize << 3);
+    asm!("csrs mie, {}", in(reg) 1usize << 7);
 }
 
 pub fn update(hart_id: usize) {
-    // TODO(task 4): 只由 hart 0 增加全局 ticks，并清除 sip.SSIP。
-    let _ = (hart_id, &TICKS, Ordering::Relaxed);
+    if hart_id == 0 {
+        TICKS.fetch_add(1, Ordering::AcqRel);
+    }
+    // 两个 hart 都要清自己的 SSIP，否则会反复进入同一个软件中断。
+    arch::clear_supervisor_software_interrupt();
 }
 
 pub fn ticks() -> usize {
