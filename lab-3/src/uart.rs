@@ -62,7 +62,7 @@ pub fn handle_interrupt() {
 
         // 验收标志只打印一次；直接写 UART，避免在中断上下文里争用打印锁。
         if byte == b'K' && !UART_TEST_REPORTED.swap(true, Ordering::AcqRel) {
-            for character in b"lab-3 uart test: PASS byte=K\n" {
+            for character in b"\nlab-3 uart test: PASS byte=K\n" {
                 putchar(*character);
             }
         }
